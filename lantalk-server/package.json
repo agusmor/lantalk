@@ -1,0 +1,13 @@
+{
+  "name": "lantalk-server",
+  "version": "1.0.0",
+  "description": "Headless relay server for LanTalk. Text-only prototype.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "better-sqlite3": "^11.0.0"
+  }
+}

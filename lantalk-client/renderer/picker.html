@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Choose what to share</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #14161a;
+      color: #e8e8ec;
+      padding: 16px;
+    }
+    h1 { font-size: 15px; margin: 0 0 14px; font-weight: 600; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+    }
+    .source-btn {
+      background: #1d2026;
+      border: 2px solid #2a2e36;
+      border-radius: 8px;
+      padding: 8px;
+      cursor: pointer;
+      color: #e8e8ec;
+      text-align: left;
+      font-family: inherit;
+    }
+    .source-btn:hover { border-color: #4f6bfa; }
+    .source-btn img {
+      width: 100%;
+      aspect-ratio: 16/10;
+      object-fit: cover;
+      border-radius: 5px;
+      background: #000;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .source-name {
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .empty { color: #8b8f98; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Choose what to share</h1>
+  <div id="grid" class="grid"></div>
+  <script src="picker.js"></script>
+</body>
+</html>

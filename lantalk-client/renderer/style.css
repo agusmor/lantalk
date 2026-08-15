@@ -1,0 +1,414 @@
+@font-face {
+  font-family: "Lexica Ultrallegible";
+  src: url("./fonts/LexicaUltralegible-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lexica Ultrallegible";
+  src: url("./fonts/LexicaUltralegible-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lexica Ultrallegible";
+  src: url("./fonts/LexicaUltralegible-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lexica Ultrallegible";
+  src: url("./fonts/LexicaUltralegible-BoldItalic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Lexica Ultrallegible", sans-serif;
+  background: #14161a;
+  color: #e8e8ec;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.screen { height: 100vh; }
+
+/* --- connect screen --- */
+
+#connect-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card {
+  width: 360px;
+  background: #1d2026;
+  border: 1px solid #2a2e36;
+  border-radius: 14px;
+  padding: 28px;
+}
+
+.card h1 { margin: 0 0 4px; font-size: 22px; }
+.sub { color: #8b8f98; margin: 0 0 20px; font-size: 13px; }
+
+label {
+  display: block;
+  font-size: 12px;
+  color: #a5a9b2;
+  margin: 14px 0 6px;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  background: #14161a;
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+  color: #e8e8ec;
+  font-size: 14px;
+}
+
+.hint { font-size: 11px; color: #6b6f78; margin-top: 6px; }
+
+.primary-btn {
+  width: 100%;
+  margin-top: 22px;
+  padding: 12px;
+  background: #4f6bfa;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.primary-btn:hover { background: #3d59e8; }
+
+.status { margin-top: 12px; font-size: 12px; color: #f28b82; min-height: 16px; }
+
+#discovery-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid #2a2e36; }
+
+.discovered-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.server-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 9px 12px;
+  background: #14161a;
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+  color: #e8e8ec;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+.server-btn:hover { border-color: #4f6bfa; background: #1a1d24; }
+.server-btn .server-name { font-weight: 600; }
+.server-btn .server-addr { color: #8b8f98; font-size: 11px; }
+
+/* --- chat screen --- */
+
+/* Flex column so screen-tiles can appear/disappear without needing to
+   recompute a hardcoded height for chat-log every time. */
+#chat-screen {
+  display: flex;
+  flex-direction: column;
+}
+
+.top-bar {
+  flex: 0 0 auto;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid #2a2e36;
+}
+
+.brand { font-weight: 700; }
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.peer-count { font-size: 12px; color: #8b8f98; }
+
+#voice-btn, #mute-btn, #share-btn, #deaf-btn {
+  padding: 7px 14px;
+  background: #24272e;
+  border: 1px solid #2a2e36;
+  border-radius: 7px;
+  color: #e8e8ec;
+  cursor: pointer;
+  font-size: 12px;
+}
+#voice-btn:hover, #mute-btn:hover, #share-btn:hover { background: #2c3038; }
+#voice-btn.active { background: #4f6bfa; border-color: #4f6bfa; }
+#mute-btn.active { background: #c0392b; border-color: #c0392b; }
+#share-btn.active { background: #27ae60; border-color: #27ae60; }
+
+/* Hidden (via JS setting display:none/flex) whenever nobody is sharing,
+   so it takes up zero space instead of leaving an empty gap. */
+.screen-tiles {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2a2e36;
+  overflow-y: auto;
+  resize: vertical;
+  overflow: auto;
+}
+
+.screen-tile {
+  position: relative;
+  width: 280px;
+  background: #000;
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+  overflow: hidden;
+  aspect-ratio: 16/10;
+}
+
+.screen-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.screen-tile .tile-label {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  background: rgba(0,0,0,0.6);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.tile-controls {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+.tile-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+.tile-btn:hover { background: rgba(0,0,0,0.85); }
+
+.chat-log {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 16px;
+  font-size: 14px;
+}
+
+.chat-msg { margin-bottom: 10px; line-height: 1.4; word-wrap: break-word; }
+.chat-name { color: #4f6bfa; font-weight: 600; }
+.chat-msg.me .chat-name { color: #8b8f98; }
+.chat-msg.system { color: #6b6f78; font-size: 12px; font-style: italic; }
+
+.chat-input-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  border-top: 1px solid #2a2e36;
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.chat-input-row input {
+  flex: 1;
+  padding: 10px 12px;
+  background: #1d2026;
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+  color: #e8e8ec;
+  font-size: 14px;
+}
+
+.chat-input-row button {
+  padding: 10px 16px;
+  background: #4f6bfa;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+
+.chat-body {
+  flex: 1 1 auto;
+  min-height: 0;
+
+  display: grid;
+  grid-template-columns: 180px 1fr;
+}
+
+.sidebar {
+  min-width: 0;
+  min-height: 0;
+
+  border-right: 1px solid #2a2e36;
+  background: #1d2026;
+
+  display: flex;
+  flex-direction: column;
+}
+
+.local-controls {
+  margin-top: auto;
+}
+
+.main-content {
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar hr {
+  width: 100%;
+  border: none;
+  border-top: 1px solid #2a2e36;
+  margin: 0;
+}
+
+.stream-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.stream-user {
+  margin-bottom: 2px;
+}
+
+.stream-user button {
+  width: 100%;
+  display: block;
+
+  padding: 8px 12px;
+
+  background: transparent;
+  border: none;
+
+  color: #e8e8ec;
+  text-align: left;
+
+  cursor: pointer;
+}
+
+.stream-user button:hover {
+  background: #24272e;
+}
+
+.stream-user button.selected {
+  background: #2c3038;
+  color: #fff;
+}
+
+.local-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.screen-share-status {
+  margin-top: 8px;
+}
+
+.screen-share-status button {
+  width: 100%;
+}
+
+.voice-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: space-between;
+}
+
+.voice-controls button {
+  flex: 1;
+  display: block;
+}
+
+.popout {
+  position: fixed;
+  width: 420px;
+  height: 260px;
+  background: #000;
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+  overflow: hidden;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+.popout.maximized {
+  top: 16px !important;
+  left: 16px !important;
+  width: calc(100% - 32px) !important;
+  height: calc(100% - 32px) !important;
+}
+.popout-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #14161a;
+  cursor: move;
+  user-select: none;
+}
+.popout-title { font-size: 12px; color: #e8e8ec; }
+.popout-actions { display: flex; gap: 4px; }
+.popout-actions button {
+  width: 22px; height: 22px;
+  background: #24272e; border: 1px solid #2a2e36; border-radius: 4px;
+  color: #e8e8ec; cursor: pointer; font-size: 12px; padding: 0;
+}
+.popout-actions button:hover { background: #2c3038; }
+.popout-body { flex: 1 1 auto; min-height: 0; }
+.popout-body video { width: 100%; height: 100%; object-fit: contain; background: #000; }

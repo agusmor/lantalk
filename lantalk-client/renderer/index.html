@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>LanTalk</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- CONNECT SCREEN -->
+  <div id="connect-screen" class="screen">
+    <div class="card">
+      <h1>LanTalk</h1>
+      <p class="sub">Text &amp; voice</p>
+
+      <label>Your name</label>
+      <input id="name-input" type="text" placeholder="e.g. Alex" maxlength="24" />
+
+      <label>Server address</label>
+      <input id="server-input" type="text" placeholder="192.168.1.50 or 192.168.1.50:51000" />
+      <div class="hint">Port defaults to 51000 if you leave it out. Use "localhost" if the server is on this machine.</div>
+
+      <button id="connect-btn" class="primary-btn">Connect</button>
+      <div id="status" class="status"></div>
+
+      <div id="discovery-section">
+        <div id="discovery-status" class="hint">Searching for servers on this network…</div>
+        <div id="discovered-servers" class="discovered-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHAT SCREEN -->
+  <div id="chat-screen" class="screen">
+
+    <div class="top-bar">
+      <div class="brand">LanTalk</div>
+      <div id="peer-count" class="peer-count"></div>
+    </div>
+
+    <div class="chat-body">
+
+      <aside class="sidebar">
+
+        <button class="brand" id="brand-btn">
+          LanTalk
+        </button>
+      
+        <section class="stream-section">
+      
+          <ul class="stream-list">
+      
+            <li class="stream-user">
+              <button>
+                Alice
+              </button>
+            </li>
+      
+            <li class="stream-user">
+              <button>
+                Bob
+              </button>
+            </li>
+      
+            <li class="stream-user">
+              <button>
+                Charlie
+              </button>
+            </li>
+      
+          </ul>
+      
+        </section>
+        
+      
+        <section class="local-controls">
+          <hr>
+
+          <div class="local-buttons">
+            <div class="local-header">
+              <span class="local-user">Username</span>
+              <button id="voice-btn">Join Voice</button>
+            </div>
+
+            <div class="local-main">
+              <div class="screen-share-status">
+                <button id="share-btn" style="display:none">Share Screen</button>
+              </div>
+
+              <button id="mute-btn" style="display:none">Mute</button>
+              <button id="deafen-btn" style="display:none">Deafen</button>
+            </div>
+      
+          </div>
+      
+        </section>
+      
+      </aside>
+
+      <main class="main-content">
+
+        <div id="screen-tiles" class="screen-tiles"></div>
+
+        <div id="chat-log" class="chat-log"></div>
+
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Type a message…" />
+          <button id="chat-send">Send</button>
+        </div>
+
+      </main>
+
+    </div>
+
+    <!-- Remote peers' audio plays through these; nothing is shown visually. -->
+    <div id="audio-container" style="display:none"></div>
+
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
