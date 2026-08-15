@@ -20,6 +20,7 @@ const db = new Database(path.join(dataDir, 'chat.db'));
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id TEXT,
     name TEXT NOT NULL,
     text TEXT NOT NULL,
     ts INTEGER NOT NULL
@@ -32,10 +33,10 @@ db.exec(`
   END;
 `);
 
-const insertMessage = db.prepare('INSERT INTO messages (name, text, ts) VALUES (?, ?, ?)');
-const recentMessages = db.prepare('SELECT name, text, ts FROM messages ORDER BY id DESC LIMIT ?');
+const insertMessage = db.prepare('INSERT INTO messages (client_id, name, text, ts) VALUES (?, ?, ?, ?)');
+const recentMessages = db.prepare('SELECT client_id AS clientId, name, text, ts FROM messages ORDER BY id DESC LIMIT ?');
 const searchMessages = db.prepare(`
-  SELECT m.name, m.text, m.ts
+  SELECT m.client_id AS clientId, m.name, m.text, m.ts
   FROM messages_fts f JOIN messages m ON m.id = f.rowid
   WHERE messages_fts MATCH ?
   ORDER BY m.id DESC LIMIT ?
@@ -49,7 +50,7 @@ process.on('SIGTERM', () => { db.close(); process.exit(0); });
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 51000;
 const DISCOVERY_PORT = process.env.DISCOVERY_PORT ? parseInt(process.env.DISCOVERY_PORT, 10) : 51001;
 
-// clients: id -> { ws, name, voiceActive }
+// clients: id -> { ws, name, voiceActive, clientId }
 const clients = new Map();
 let nextId = 1;
 
@@ -101,7 +102,7 @@ function broadcast(payloadObj, exceptId = null) {
 
 wss.on('connection', (ws) => {
   const id = String(nextId++);
-  clients.set(id, { ws, name: null, voiceActive: false });
+  clients.set(id, { ws, name: null, voiceActive: false, clientId: null });
   console.log(`[connect] client ${id}`);
 
   ws.on('message', (raw) => {
@@ -114,7 +115,9 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'join') {
       const name = (msg.name || 'Anonymous').slice(0, 32);
-      clients.get(id).name = name;
+      const client = clients.get(id);
+      client.name = name;
+      client.clientId = typeof msg.clientId === 'string' ? msg.clientId.slice(0, 64) : null;
       console.log(`[join] ${id} as "${name}"`);
 
       const history = recentMessages.all(50).reverse(); // oldest first for correct display order
@@ -140,8 +143,9 @@ wss.on('connection', (ws) => {
       if (!text.trim()) return;
 
       console.log(`[chat] ${sender.name}: ${text}`);
-      broadcast({ type: 'chat', from: id, name: sender.name, text });
-      insertMessage.run(sender.name, text, Date.now());
+      const ts = Date.now();
+      broadcast({ type: 'chat', from: id, clientId: sender.clientId, name: sender.name, text, ts });
+      insertMessage.run(sender.clientId, sender.name, text, ts);
     }
 
     // WebRTC signaling relay: we never look inside `data` (it's SDP or

@@ -144,3 +144,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# LanTalk: per-machine config (identity.json etc). Beside the
+# executable in a packaged build; lives here during dev instead.
+/config/

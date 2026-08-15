@@ -13,9 +13,11 @@ let myName = null;
 let localStream = null;
 let screenStream = null;
 let muted = false;
+let deafened = false;
 let voiceActive = false;
 let sharing = false;
 let sharePending = false;
+let lastSearchRequestId = 0;
 const peers = new Map(); // id -> { name, pc, audioEl, videoEl }
 
 // Pure LAN/ZeroTier: no NAT to punch through, so no STUN/TURN needed.
@@ -50,6 +52,70 @@ const voiceBtn = document.getElementById('voice-btn');
 const shareBtn = document.getElementById('share-btn');
 const screenTilesEl = document.getElementById('screen-tiles');
 const audioContainerEl = document.getElementById('audio-container');
+const searchToggleBtn = document.getElementById('search-toggle-btn');
+const searchPanelEl = document.getElementById('search-panel');
+const searchInputEl = document.getElementById('search-input');
+const searchCloseBtn = document.getElementById('search-close-btn');
+const searchResultsEl = document.getElementById('search-results');
+
+// --- persistent identity -------------------------------------------
+// A small UUID generated once and stored on disk, sent alongside 'join'
+// so the server (and thus chat history) can recognize "this is the same
+// person" across separate connections/sessions — connection ids reset
+// to 1 on every server restart, so they can't be used for that. This is
+// a claimed identity, not a verified one: there's no auth in this app,
+// so nothing stops someone from editing their own identity.json to
+// claim a different clientId. Fine for a trusted LAN/friend group,
+// worth remembering if that trust model ever changes.
+//
+// The config file lives beside the app's executable, which only the
+// main process can actually determine (app.isPackaged / the real
+// process.execPath aren't available in the renderer) — so this starts
+// with an IPC round-trip, and everything that depends on `identity`
+// awaits `identityReady` first.
+
+const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { ipcRenderer } = require('electron');
+
+let identity = null;
+let identityFilePath = null;
+
+function loadIdentity() {
+  try {
+    return JSON.parse(fs.readFileSync(identityFilePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function saveIdentity(value) {
+  if (!identityFilePath) return;
+  try {
+    fs.mkdirSync(path.dirname(identityFilePath), { recursive: true });
+    fs.writeFileSync(identityFilePath, JSON.stringify(value, null, 2));
+  } catch (err) {
+    console.error('[identity] failed to save:', err.message);
+  }
+}
+
+const identityReady = (async () => {
+  const configDir = await ipcRenderer.invoke('get-config-dir');
+  identityFilePath = path.join(configDir, 'identity.json');
+
+  identity = loadIdentity();
+  if (!identity) {
+    identity = { clientId: crypto.randomUUID(), lastUsername: '', lastServerAddr: '' };
+    saveIdentity(identity);
+  }
+  nameInput.value = identity.lastUsername || '';
+  serverInput.value = identity.lastServerAddr || '';
+  if (identity.lastServerAddr) {
+    attemptConnect(identity.lastServerAddr);
+  }
+})();
 
 // --- discovery -------------------------------------------------------
 // Broadcasts a small UDP packet asking "any LanTalk servers out there?"
@@ -58,7 +124,6 @@ const audioContainerEl = document.getElementById('audio-container');
 // window and renders a button per unique server found.
 
 const dgram = require('dgram');
-const os = require('os');
 
 function localBroadcastAddresses() {
   const nets = os.networkInterfaces();
@@ -146,21 +211,29 @@ function renderDiscoveredServers(found) {
 startDiscovery();
 
 // --- connect ---
-connectBtn.onclick = () => {
+
+connectBtn.onclick = async () => {
+  await identityReady;
   myName = nameInput.value.trim() || 'Anonymous';
+  identity.lastUsername = myName;
+  saveIdentity(identity);
+
   const addr = normalizeServerAddr(serverInput.value);
   if (!addr) {
     statusEl.textContent = 'Enter a server address.';
     return;
   }
+  attemptConnect(addr);
+};
 
+async function attemptConnect(addr) {
   connectBtn.disabled = true;
   statusEl.textContent = `Connecting to ${addr}…`;
 
   ws = new WebSocket(`ws://${addr}`);
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'join', name: myName }));
+    ws.send(JSON.stringify({ type: 'join', name: myName, clientId: identity.clientId }));
   };
 
   ws.onerror = () => {
@@ -187,7 +260,7 @@ connectBtn.onclick = () => {
   ws.onmessage = (event) => {
     handleMessage(JSON.parse(event.data));
   };
-};
+}
 
 function handleMessage(msg) {
   switch (msg.type) {
@@ -199,6 +272,8 @@ function handleMessage(msg) {
       showChatScreen();
       appendSystemMessage(`Connected as ${myName}.`);
       updatePeerCount();
+      identity.lastServerAddr = lastAttemptedAddr;
+      saveIdentity(identity);
       break;
 
     case 'peer-joined':
@@ -218,7 +293,7 @@ function handleMessage(msg) {
     }
 
     case 'chat':
-      appendChatMessage(msg.name, msg.text, msg.from === myId);
+      appendChatMessage(msg.name, msg.text, msg.clientId === identity.clientId, msg.ts);
       break;
 
     case 'signal': {
@@ -257,9 +332,11 @@ function handleMessage(msg) {
       break;
 
     case 'chat-history':
-      for (const m of msg.messages) appendChatMessage(m.name, m.text, false);
+      for (const m of msg.messages) {
+        appendChatMessage(m.name, m.text, m.clientId === identity.clientId, m.ts);
+      }
       break;
-    
+
     case 'chat-search-results':
       if (msg.requestId === lastSearchRequestId) renderSearchResults(msg.results);
       break;
@@ -339,18 +416,6 @@ function createPeerConnection(id, isInitiator) {
   };
 }
 
-/* async function sendOffer(id) {
-  const entry = peers.get(id);
-  if (!entry || !entry.pc) return;
-  try {
-    const offer = await entry.pc.createOffer();
-    await entry.pc.setLocalDescription(offer);
-    sendSignal(id, { sdp: entry.pc.localDescription });
-  } catch (err) {
-    console.error(`[voice] failed to create offer for ${entry.name}:`, err.message);
-  }
-} */
-
 function sendSignal(to, data) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: 'signal', to, data }));
@@ -398,6 +463,7 @@ function attachRemoteAudio(id, stream) {
   if (!entry.audioEl) {
     const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
+    audioEl.muted = deafened;
     audioContainerEl.appendChild(audioEl);
     entry.audioEl = audioEl;
   }
@@ -439,8 +505,6 @@ function attachRemoteVideo(id, stream) {
 
     tile.querySelector('.fullscreen-btn').onclick = () => toggleFullscreen(videoEl);
 
-    tile.querySelector('.fullscreen-btn').onclick = () => toggleFullscreen(videoEl);
-
     tile.querySelector('.pip-btn').onclick = () => togglePopout(entry, tile);
 
     screenTilesEl.appendChild(tile);
@@ -459,59 +523,13 @@ function attachRemoteVideo(id, stream) {
   });
 }
 
-//function toggleFullscreen(videoEl) {
-//  if (document.fullscreenElement === videoEl) {
-//    document.exitFullscreen();
-//  } else {
-//    videoEl.requestFullscreen().catch((err) => {
-//      console.error('[screen share] fullscreen failed:', err.message);
-//    });
-//  }
-//}
-
-async function toggleFullscreen(videoEl) {
-  console.log('[renderer] toggleFullscreen');
-  console.log('[renderer] video:', videoEl);
-  console.log('[renderer] connected:', videoEl.isConnected);
-  console.log('[renderer] readyState:', videoEl.readyState);
-  console.log('[renderer] fullscreenEnabled:', document.fullscreenEnabled);
-  console.log('[renderer] fullscreenElement:', document.fullscreenElement);
-  console.log(
-    '[renderer] userActivation:',
-    navigator.userActivation?.isActive
-  );
-
-  document.addEventListener(
-    'fullscreenchange',
-    () => console.log(
-      '[renderer] fullscreenchange:',
-      document.fullscreenElement
-    ),
-    { once: true }
-  );
-
-  document.addEventListener(
-    'fullscreenerror',
-    (event) => console.error(
-      '[renderer] fullscreenerror:',
-      event
-    ),
-    { once: true }
-  );
-
-  try {
-    console.log('[renderer] calling requestFullscreen()');
-
-    const promise = videoEl.requestFullscreen();
-
-    console.log('[renderer] requestFullscreen returned:', promise);
-
-    await promise;
-
-    console.log('[renderer] requestFullscreen RESOLVED');
-    console.log('[renderer] fullscreenElement:', document.fullscreenElement);
-  } catch (err) {
-    console.error('[renderer] requestFullscreen REJECTED:', err);
+function toggleFullscreen(videoEl) {
+  if (document.fullscreenElement === videoEl) {
+    document.exitFullscreen();
+  } else {
+    videoEl.requestFullscreen().catch((err) => {
+      console.error('[screen share] fullscreen failed:', err.message);
+    });
   }
 }
 
@@ -694,7 +712,7 @@ function leaveVoice() {
 
   voiceActive = false;
   muted = false;
-  deafen = false
+  deafened = false;
   voiceBtn.textContent = 'Join Voice';
   voiceBtn.classList.remove('active');
   muteBtn.style.display = 'none';
@@ -713,6 +731,26 @@ muteBtn.onclick = () => {
   localStream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
   muteBtn.textContent = muted ? 'Unmute' : 'Mute';
   muteBtn.classList.toggle('active', muted);
+};
+
+deafBtn.onclick = () => {
+  deafened = !deafened;
+  deafBtn.textContent = deafened ? 'Undeafen' : 'Deafen';
+  deafBtn.classList.toggle('active', deafened);
+
+  for (const entry of peers.values()) {
+    if (entry.audioEl) entry.audioEl.muted = deafened;
+  }
+
+  // Deafening also mutes your own mic (matches common voice-chat
+  // convention elsewhere) — un-deafening does NOT auto-unmute, same
+  // convention, you have to do that explicitly.
+  if (deafened && !muted) {
+    muted = true;
+    if (localStream) localStream.getAudioTracks().forEach((t) => { t.enabled = false; });
+    muteBtn.textContent = 'Unmute';
+    muteBtn.classList.add('active');
+  }
 };
 
 // --- screen share --------------------------------------------------
@@ -794,6 +832,47 @@ function stopScreenShare() {
   shareBtn.classList.remove('active');
 }
 
+// --- chat search ---
+
+searchToggleBtn.onclick = () => {
+  const showing = searchPanelEl.style.display !== 'none';
+  searchPanelEl.style.display = showing ? 'none' : '';
+  if (!showing) searchInputEl.focus();
+};
+
+searchCloseBtn.onclick = () => {
+  searchPanelEl.style.display = 'none';
+};
+
+searchInputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') searchChat(searchInputEl.value.trim());
+});
+
+function searchChat(query) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  lastSearchRequestId = Date.now() + Math.random();
+  ws.send(JSON.stringify({ type: 'chat-search', query, requestId: lastSearchRequestId }));
+}
+
+function renderSearchResults(results) {
+  searchResultsEl.innerHTML = '';
+  if (results.length === 0) {
+    searchResultsEl.innerHTML = '<div class="hint">No matches.</div>';
+    return;
+  }
+  for (const r of results) {
+    const div = document.createElement('div');
+    div.className = 'search-result';
+    const nameEl = document.createElement('span');
+    nameEl.className = 'chat-name';
+    nameEl.textContent = `${r.name} — ${new Date(r.ts).toLocaleString()}`;
+    div.appendChild(nameEl);
+    div.appendChild(document.createElement('br'));
+    div.appendChild(document.createTextNode(r.text));
+    searchResultsEl.appendChild(div);
+  }
+}
+
 // --- chat send/receive ---
 
 chatSendBtn.onclick = sendChat;
@@ -808,14 +887,69 @@ function sendChat() {
   chatInput.value = '';
 }
 
-function appendChatMessage(name, text, isMe) {
+// Tracks the calendar day of the last rendered message so a divider
+// only gets inserted when the day actually changes — works the same
+// way whether messages are arriving live or being replayed as history,
+// since history always renders first and in chronological order.
+let lastMessageDateKey = null;
+
+function dateKey(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function maybeInsertDateDivider(ts) {
+  const key = dateKey(ts);
+  if (key === lastMessageDateKey) return;
+  lastMessageDateKey = key;
+
+  const divider = document.createElement('div');
+  divider.className = 'date-divider';
+  divider.textContent = formatDateDividerLabel(ts);
+  chatLog.appendChild(divider);
+}
+
+function formatDateDividerLabel(ts) {
+  const now = Date.now();
+  const yesterday = now - 24 * 60 * 60 * 1000;
+  if (dateKey(ts) === dateKey(now)) return 'Today';
+  if (dateKey(ts) === dateKey(yesterday)) return 'Yesterday';
+  return new Date(ts).toLocaleDateString(undefined, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+}
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatFullDateTime(ts) {
+  return new Date(ts).toLocaleString(undefined, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+
+function appendChatMessage(name, text, isMe, ts) {
+  if (ts) maybeInsertDateDivider(ts);
+
   const div = document.createElement('div');
   div.className = 'chat-msg' + (isMe ? ' me' : '');
+
   const nameSpan = document.createElement('span');
   nameSpan.className = 'chat-name';
   nameSpan.textContent = `${name}: `;
   div.appendChild(nameSpan);
   div.appendChild(document.createTextNode(text));
+
+  if (ts) {
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'chat-time';
+    timeSpan.textContent = formatTime(ts);
+    timeSpan.title = formatFullDateTime(ts);
+    div.appendChild(timeSpan);
+  }
+
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
 }

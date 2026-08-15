@@ -7,6 +7,17 @@ const path = require('path');
 
 let mainWindow = null;
 
+// Config (identity.json etc) lives next to the actual executable in a
+// packaged build. In dev (`electron .`), process.execPath points deep
+// inside node_modules/electron/dist, which isn't useful as a config
+// location — __dirname (the app's own source folder) is the sane
+// stand-in there. Renderer can't compute this itself: app.isPackaged
+// and process.execPath (the real one) are main-process-only.
+function getConfigDir() {
+  const base = app.isPackaged ? path.dirname(process.execPath) : __dirname;
+  return path.join(base, 'config');
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 900,
@@ -23,23 +34,16 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  
+
+  // Electron doesn't reliably put the actual OS window into fullscreen
+  // just because a page called element.requestFullscreen() — that part
+  // of the sync is left to us on some platforms/window managers,
+  // particularly on Linux.
   mainWindow.webContents.on('enter-html-full-screen', () => {
-    console.log('[fullscreen] HTML fullscreen requested');
     mainWindow.setFullScreen(true);
   });
-
   mainWindow.webContents.on('leave-html-full-screen', () => {
-    console.log('[fullscreen] HTML fullscreen exited');
     mainWindow.setFullScreen(false);
-  });
-
-  mainWindow.on('enter-full-screen', () => {
-    console.log('[fullscreen] native fullscreen entered');
-  });
-
-  mainWindow.on('leave-full-screen', () => {
-    console.log('[fullscreen] native fullscreen exited');
   });
 }
 
@@ -91,6 +95,8 @@ function pickSource(sources) {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('get-config-dir', () => getConfigDir());
+
   // Electron blocks getUserMedia by default unless something explicitly
   // approves it — there's no OS-style prompt like a browser shows.
   // Since this app only ever asks for the mic (never camera, never

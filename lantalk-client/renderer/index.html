@@ -35,7 +35,10 @@
 
     <div class="top-bar">
       <div class="brand">LanTalk</div>
-      <div id="peer-count" class="peer-count"></div>
+      <div class="top-bar-right">
+        <button id="search-toggle-btn" title="Search chat">🔍</button>
+        <div id="peer-count" class="peer-count"></div>
+      </div>
     </div>
 
     <div class="chat-body">
@@ -100,6 +103,14 @@
       <main class="main-content">
 
         <div id="screen-tiles" class="screen-tiles"></div>
+
+        <div id="search-panel" style="display:none">
+          <div class="search-input-row">
+            <input id="search-input" type="text" placeholder="Search messages…" />
+            <button id="search-close-btn">✕</button>
+          </div>
+          <div id="search-results" class="search-results"></div>
+        </div>
 
         <div id="chat-log" class="chat-log"></div>
 
