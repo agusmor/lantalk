@@ -1,0 +1,11 @@
+Place the DeepFilterNet3 asset files here (download once, from wherever
+you sourced the ~7MB/~15MB files):
+
+  renderer/audio/deepfilternet/v3/pkg/df_bg.wasm
+  renderer/audio/deepfilternet/v3/models/DeepFilterNet3_onnx.tar.gz
+
+These paths are exactly what deepfilternet3-noise-filter's AssetLoader
+requests, given assetConfig.cdnUrl = 'audio/deepfilternet' in
+renderer.js's buildLocalStream(). Nothing in this repo ships the actual
+model weights — this folder just holds the placeholder so the expected
+structure is obvious. Delete this file once the real assets are in place.

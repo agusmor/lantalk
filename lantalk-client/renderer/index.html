@@ -10,7 +10,10 @@
   <!-- CONNECT SCREEN -->
   <div id="connect-screen" class="screen">
     <div class="card">
-      <h1>LanTalk</h1>
+      <div class="card-top-row">
+        <h1>LanTalk</h1>
+        <button id="settings-btn-connect" class="settings-btn" title="Settings">⚙</button>
+      </div>
       <p class="sub">Text &amp; voice</p>
 
       <label>Your name</label>
@@ -37,6 +40,7 @@
       <div class="brand">LanTalk</div>
       <div class="top-bar-right">
         <button id="search-toggle-btn" title="Search chat">🔍</button>
+        <button id="settings-btn-chat" class="settings-btn" title="Settings">⚙</button>
         <div id="peer-count" class="peer-count"></div>
       </div>
     </div>
@@ -126,6 +130,31 @@
     <!-- Remote peers' audio plays through these; nothing is shown visually. -->
     <div id="audio-container" style="display:none"></div>
 
+  </div>
+
+  <!-- SETTINGS OVERLAY -->
+  <div id="settings-overlay" class="settings-overlay" style="display:none">
+    <div class="settings-panel">
+      <div class="settings-panel-header">
+        <span>Settings</span>
+        <button id="settings-close-btn">✕</button>
+      </div>
+
+      <div class="settings-row">
+        <label for="noise-suppression-select">Microphone noise suppression</label>
+        <select id="noise-suppression-select">
+          <option value="off">Off</option>
+          <option value="builtin">Built-in (Chromium)</option>
+          <option value="rnnoise">RNNoise</option>
+          <option value="deepfilternet">DeepFilterNet</option>
+        </select>
+      </div>
+
+      <div class="settings-row" id="suppression-level-row" style="display:none">
+        <label for="suppression-level-input">Suppression strength (<span id="suppression-level-value">50</span>)</label>
+        <input id="suppression-level-input" type="range" min="0" max="100" value="50" />
+      </div>
+    </div>
   </div>
 
   <script src="renderer.js"></script>

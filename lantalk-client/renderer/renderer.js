@@ -11,6 +11,8 @@ let ws = null;
 let myId = null;
 let myName = null;
 let localStream = null;
+let localStreamCleanup = null;
+let activeSetSuppressionLevel = null; // only set when the active pipeline supports it (DeepFilterNet)
 let screenStream = null;
 let muted = false;
 let deafened = false;
@@ -57,6 +59,14 @@ const searchPanelEl = document.getElementById('search-panel');
 const searchInputEl = document.getElementById('search-input');
 const searchCloseBtn = document.getElementById('search-close-btn');
 const searchResultsEl = document.getElementById('search-results');
+const settingsBtnConnect = document.getElementById('settings-btn-connect');
+const settingsBtnChat = document.getElementById('settings-btn-chat');
+const settingsOverlayEl = document.getElementById('settings-overlay');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+const noiseSuppressionSelect = document.getElementById('noise-suppression-select');
+const suppressionLevelRow = document.getElementById('suppression-level-row');
+const suppressionLevelInput = document.getElementById('suppression-level-input');
+const suppressionLevelValueEl = document.getElementById('suppression-level-value');
 
 // --- persistent identity -------------------------------------------
 // A small UUID generated once and stored on disk, sent alongside 'join'
@@ -68,11 +78,11 @@ const searchResultsEl = document.getElementById('search-results');
 // claim a different clientId. Fine for a trusted LAN/friend group,
 // worth remembering if that trust model ever changes.
 //
-// The config file lives beside the app's executable, which only the
-// main process can actually determine (app.isPackaged / the real
-// process.execPath aren't available in the renderer) — so this starts
-// with an IPC round-trip, and everything that depends on `identity`
-// awaits `identityReady` first.
+// The config directory lives beside the app's executable, which only
+// the main process can actually determine (app.isPackaged / the real
+// process.execPath aren't available in the renderer) — so everything
+// here starts with one shared IPC round-trip, and anything that
+// depends on identity/settings awaits the relevant *Ready promise.
 
 const crypto = require('crypto');
 const path = require('path');
@@ -82,40 +92,65 @@ const { ipcRenderer } = require('electron');
 
 let identity = null;
 let identityFilePath = null;
+let settings = null;
+let settingsFilePath = null;
 
-function loadIdentity() {
+function loadJsonFile(filePath) {
   try {
-    return JSON.parse(fs.readFileSync(identityFilePath, 'utf8'));
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch {
     return null;
   }
 }
 
-function saveIdentity(value) {
-  if (!identityFilePath) return;
+function saveJsonFile(filePath, value) {
+  if (!filePath) return;
   try {
-    fs.mkdirSync(path.dirname(identityFilePath), { recursive: true });
-    fs.writeFileSync(identityFilePath, JSON.stringify(value, null, 2));
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
   } catch (err) {
-    console.error('[identity] failed to save:', err.message);
+    console.error(`[config] failed to save ${filePath}:`, err.message);
   }
 }
 
-const identityReady = (async () => {
+function saveIdentity(value) { saveJsonFile(identityFilePath, value); }
+function saveSettings(value) { saveJsonFile(settingsFilePath, value); }
+
+const configReady = (async () => {
   const configDir = await ipcRenderer.invoke('get-config-dir');
   identityFilePath = path.join(configDir, 'identity.json');
+  settingsFilePath = path.join(configDir, 'settings.json');
 
-  identity = loadIdentity();
+  identity = loadJsonFile(identityFilePath);
   if (!identity) {
-    identity = { clientId: crypto.randomUUID(), lastUsername: '', lastServerAddr: '' };
+    identity = { clientId: crypto.randomUUID(), lastUsername: '' };
     saveIdentity(identity);
   }
   nameInput.value = identity.lastUsername || '';
-  serverInput.value = identity.lastServerAddr || '';
-  if (identity.lastServerAddr) {
-    attemptConnect(identity.lastServerAddr);
+
+  settings = loadJsonFile(settingsFilePath);
+  if (!settings) {
+    settings = { noiseSuppression: 'builtin', suppressionLevel: 50 };
+    saveSettings(settings);
   }
+  noiseSuppressionSelect.value = settings.noiseSuppression;
+  suppressionLevelInput.value = settings.suppressionLevel ?? 50;
+  suppressionLevelValueEl.textContent = suppressionLevelInput.value;
+  updateSuppressionLevelRowVisibility();
 })();
+
+// Kept as an alias — same promise, just the name used elsewhere in the
+// file so far for anything that only actually needs identity to be ready.
+const identityReady = configReady;
+
+// Reachable from both screens — someone might want to set their
+// preferences before ever connecting, not just mid-call.
+settingsBtnConnect.onclick = () => { settingsOverlayEl.style.display = ''; };
+settingsBtnChat.onclick = () => { settingsOverlayEl.style.display = ''; };
+settingsCloseBtn.onclick = () => { settingsOverlayEl.style.display = 'none'; };
+settingsOverlayEl.addEventListener('click', (e) => {
+  if (e.target === settingsOverlayEl) settingsOverlayEl.style.display = 'none';
+});
 
 // --- discovery -------------------------------------------------------
 // Broadcasts a small UDP packet asking "any LanTalk servers out there?"
@@ -211,9 +246,9 @@ function renderDiscoveredServers(found) {
 startDiscovery();
 
 // --- connect ---
-
 connectBtn.onclick = async () => {
   await identityReady;
+
   myName = nameInput.value.trim() || 'Anonymous';
   identity.lastUsername = myName;
   saveIdentity(identity);
@@ -223,10 +258,7 @@ connectBtn.onclick = async () => {
     statusEl.textContent = 'Enter a server address.';
     return;
   }
-  attemptConnect(addr);
-};
 
-async function attemptConnect(addr) {
   connectBtn.disabled = true;
   statusEl.textContent = `Connecting to ${addr}…`;
 
@@ -260,7 +292,7 @@ async function attemptConnect(addr) {
   ws.onmessage = (event) => {
     handleMessage(JSON.parse(event.data));
   };
-}
+};
 
 function handleMessage(msg) {
   switch (msg.type) {
@@ -272,8 +304,6 @@ function handleMessage(msg) {
       showChatScreen();
       appendSystemMessage(`Connected as ${myName}.`);
       updatePeerCount();
-      identity.lastServerAddr = lastAttemptedAddr;
-      saveIdentity(identity);
       break;
 
     case 'peer-joined':
@@ -643,28 +673,200 @@ voiceBtn.onclick = () => {
   else joinVoice();
 };
 
-// Chromium's own audio processing pipeline, requested as constraints —
-// no extra dependency, works because Electron's renderer is Chromium.
-// noiseSuppression here is Chromium's built-in ML-based suppressor.
+// --- microphone noise suppression --------------------------------------
+// Four modes, picked in Settings and persisted to settings.json:
+//   'off'          — raw mic, only echo cancellation + auto gain.
+//   'builtin'      — Chromium's own ML-based suppressor, via constraints.
+//   'rnnoise'      — the actual RNNoise model, via @sapphi-red/web-noise-
+//                    suppressor's RnnoiseWorkletNode. Runs in place of
+//                    the built-in suppressor, not stacked on top of it —
+//                    running both tends to fight each other and sound
+//                    worse than either alone.
+//   'deepfilternet'— DeepFilterNet3, via deepfilternet3-noise-filter.
+//                    Generally stronger on non-stationary noise (typing,
+//                    barking, traffic) than RNNoise, at more CPU cost.
+//                    Fetches its WASM + ONNX model (~22MB total) from a
+//                    CDN by default — self-hosted here instead, see the
+//                    assetConfig below and the file placement note next
+//                    to it.
 //
-// Planned: make this switchable in the UI between "Built-in" / "RNNoise"
-// / "DeepFilterNet" (and off). Whichever is picked would replace this
-// constraint with an AudioWorklet stage inserted between the raw mic
-// stream and localStream — nothing downstream (signaling, peer
-// connections, roster) needs to know or care which one is active, since
-// they only ever consume whatever localStream ends up being.
-// Planned: expose these three as individual toggles in a settings panel
-// instead of hardcoding all-on. Also planned from that same panel: an
-// input gain stage before localStream, a master/app output volume, and
-// per-peer volume (each remote <audio> element in attachRemoteAudio
-// already has its own independently drivable .volume for that last one).
-const MIC_CONSTRAINTS = {
-  audio: {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-  },
-  video: false,
+// Whichever mode is active, everything downstream — mute, peer
+// connections, signaling — only ever consumes `localStream`, and has
+// no idea which pipeline built it. That's on purpose: it's what makes
+// the live hot-swap in the settings dropdown possible without having
+// to touch anything else.
+
+const { RnnoiseWorkletNode, loadRnnoise } = require('@sapphi-red/web-noise-suppressor');
+// deepfilternet3-noise-filter has a real packaging bug: its package.json
+// declares "type": "module", which makes Node treat every plain .js file
+// inside it — including dist/index.js, which is actually written in
+// CommonJS syntax — as an ES module. require() on it throws
+// "exports is not defined in ES module scope" as a direct result. The
+// package's real ESM build works fine; loading it via dynamic import()
+// instead of require() sidesteps the broken CJS path entirely. Lazy +
+// cached since import() is async and this only needs to happen once.
+let DeepFilterNet3CoreClass = null;
+async function getDeepFilterNet3Core() {
+  if (!DeepFilterNet3CoreClass) {
+    const mod = await import('deepfilternet3-noise-filter');
+    DeepFilterNet3CoreClass = mod.DeepFilterNet3Core;
+  }
+  return DeepFilterNet3CoreClass;
+}
+
+// Builds a fresh processed mic stream for the given mode. Returns both
+// the stream and a matching cleanup function, rather than mutating any
+// shared state directly — that's what lets the settings hot-swap build
+// the *new* pipeline before tearing down the *old* one, instead of the
+// two colliding over shared variables.
+async function buildLocalStream(mode) {
+  if (mode === 'rnnoise') {
+    const rawStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true },
+      video: false,
+    });
+
+    // RNNoise operates on fixed 480-sample/10ms frames — the context
+    // has to actually run at 48kHz, not just resample on the way in.
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    const wasmBinary = await loadRnnoise({
+      url: 'audio/rnnoise.wasm',
+      simdUrl: 'audio/rnnoise_simd.wasm',
+    });
+    await ctx.audioWorklet.addModule('audio/rnnoise-worklet.js');
+
+    const source = ctx.createMediaStreamSource(rawStream);
+    const node = new RnnoiseWorkletNode(ctx, { wasmBinary, maxChannels: 1 });
+    const dest = ctx.createMediaStreamDestination();
+    source.connect(node);
+    node.connect(dest);
+
+    return {
+      stream: dest.stream,
+      cleanup: () => {
+        node.destroy();
+        ctx.close();
+        rawStream.getTracks().forEach((t) => t.stop());
+      },
+    };
+  }
+
+  if (mode === 'deepfilternet') {
+    const rawStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true },
+      video: false,
+    });
+
+    const ctx = new AudioContext({ sampleRate: 48000 });
+
+    // cdnUrl points at the two asset files self-hosted locally instead
+    // of the package's default (a public CDN, which we don't want —
+    // this app is meant to work with zero internet dependency). It
+    // fetches, relative to this path:
+    //   v3/pkg/df_bg.wasm
+    //   v3/models/DeepFilterNet3_onnx.tar.gz
+    // Both need to physically exist at
+    // renderer/audio/deepfilternet/v3/pkg/df_bg.wasm and
+    // renderer/audio/deepfilternet/v3/models/DeepFilterNet3_onnx.tar.gz
+    // — download them once and place them there; nothing in this repo
+    // ships the ~22MB of model weights itself.
+    const DeepFilterNet3Core = await getDeepFilterNet3Core();
+    const core = new DeepFilterNet3Core({
+      sampleRate: 48000,
+      noiseReductionLevel: settings.suppressionLevel ?? 50,
+      assetConfig: { cdnUrl: 'audio/deepfilternet' },
+    });
+    await core.initialize();
+    const node = await core.createAudioWorkletNode(ctx);
+
+    const source = ctx.createMediaStreamSource(rawStream);
+    const dest = ctx.createMediaStreamDestination();
+    source.connect(node);
+    node.connect(dest);
+
+    return {
+      stream: dest.stream,
+      cleanup: () => {
+        core.destroy();
+        ctx.close();
+        rawStream.getTracks().forEach((t) => t.stop());
+      },
+      setSuppressionLevel: (level) => core.setSuppressionLevel(level),
+    };
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: mode === 'builtin',
+      autoGainControl: true,
+    },
+    video: false,
+  });
+
+  return {
+    stream,
+    cleanup: () => { stream.getTracks().forEach((t) => t.stop()); },
+  };
+}
+
+// Changing this mid-call swaps the live audio via replaceTrack() rather
+// than tearing the connection down — no renegotiation, no
+// onnegotiationneeded firing, peers experience a seamless swap instead
+// of a reconnect blip.
+noiseSuppressionSelect.onchange = async () => {
+  await configReady;
+  const newMode = noiseSuppressionSelect.value;
+
+  if (!voiceActive) {
+    settings.noiseSuppression = newMode;
+    saveSettings(settings);
+    return;
+  }
+
+  let built;
+  try {
+    built = await buildLocalStream(newMode);
+  } catch (err) {
+    appendSystemMessage(`Switching noise suppression failed: ${err.message}`);
+    noiseSuppressionSelect.value = settings.noiseSuppression; // nothing changed, revert the dropdown
+    return;
+  }
+
+  const newTrack = built.stream.getAudioTracks()[0];
+  newTrack.enabled = !muted; // carry current mute state onto the new track
+
+  for (const entry of peers.values()) {
+    if (!entry.pc) continue;
+    const sender = entry.pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+    if (sender) sender.replaceTrack(newTrack);
+  }
+
+  const oldCleanup = localStreamCleanup;
+  localStream = built.stream;
+  localStreamCleanup = built.cleanup;
+  activeSetSuppressionLevel = built.setSuppressionLevel || null;
+  oldCleanup(); // tear down the old pipeline only after the new one is live
+
+  settings.noiseSuppression = newMode;
+  saveSettings(settings);
+};
+
+noiseSuppressionSelect.addEventListener('change', updateSuppressionLevelRowVisibility);
+
+function updateSuppressionLevelRowVisibility() {
+  suppressionLevelRow.style.display = noiseSuppressionSelect.value === 'deepfilternet' ? '' : 'none';
+}
+
+// Applies live via the worklet's own message port (no rebuild needed)
+// when DeepFilterNet is the active pipeline; otherwise this just
+// persists the choice for whenever it's selected next.
+suppressionLevelInput.oninput = () => {
+  const level = parseInt(suppressionLevelInput.value, 10);
+  suppressionLevelValueEl.textContent = level;
+  settings.suppressionLevel = level;
+  saveSettings(settings);
+  if (activeSetSuppressionLevel) activeSetSuppressionLevel(level);
 };
 
 async function joinVoice() {
@@ -674,7 +876,10 @@ async function joinVoice() {
   voiceBtn.textContent = 'Requesting mic…';
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+    const built = await buildLocalStream(settings.noiseSuppression);
+    localStream = built.stream;
+    localStreamCleanup = built.cleanup;
+    activeSetSuppressionLevel = built.setSuppressionLevel || null;
   } catch (err) {
     appendSystemMessage(`Microphone access failed: ${err.message}`);
     voiceBtn.disabled = false;
@@ -705,10 +910,12 @@ function leaveVoice() {
 
   for (const id of peers.keys()) closePeerConnection(id);
 
-  if (localStream) {
-    localStream.getTracks().forEach((t) => t.stop());
-    localStream = null;
+  if (localStreamCleanup) {
+    localStreamCleanup();
+    localStreamCleanup = null;
   }
+  localStream = null;
+  activeSetSuppressionLevel = null;
 
   voiceActive = false;
   muted = false;
