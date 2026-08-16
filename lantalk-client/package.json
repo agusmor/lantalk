@@ -29,7 +29,13 @@
     "directories": { "output": "release" },
     "files": ["main.js", "renderer/**/*", "package.json"],
     "asarUnpack": ["renderer/audio/**/*"],
-    "linux": { "target": "AppImage", "category": "Network" },
-    "win": { "target": "nsis" }
+    "linux": {
+      "target": "AppImage",
+      "category": "Network",
+      "icon": "build/icon.png",
+      "desktopName": "lantalk.desktop",
+      "syncDesktopName": true
+    },
+    "win": { "target": "nsis", "icon": "build/icon.ico" }
   }
 }

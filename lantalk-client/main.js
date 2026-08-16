@@ -24,6 +24,7 @@ function createWindow() {
     height: 650,
     backgroundColor: '#14161a',
     title: 'LanTalk',
+    icon: path.join(__dirname, 'renderer', 'icon.png'),
     webPreferences: {
       // Simple on purpose: this app only ever loads its own bundled UI
       // on a trusted local network, so we skip the usual sandboxing
