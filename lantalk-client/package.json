@@ -7,7 +7,8 @@
     "start": "electron ."
   },
   "devDependencies": {
-    "electron": "^43.4.0"
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
     "@sapphi-red/web-noise-suppressor": "^0.4.0",
@@ -15,5 +16,20 @@
   },
   "allowScripts": {
     "electron@33.4.11": true
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:win": "electron-builder --win nsis",
+    "dist": "electron-builder --linux AppImage --win nsis"
+  },
+  "build": {
+    "appId": "com.lantalk.client",
+    "productName": "LanTalk",
+    "directories": { "output": "release" },
+    "files": ["main.js", "renderer/**/*", "package.json"],
+    "asarUnpack": ["renderer/audio/**/*"],
+    "linux": { "target": "AppImage", "category": "Network" },
+    "win": { "target": "nsis" }
   }
 }
