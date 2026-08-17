@@ -701,14 +701,26 @@ const { RnnoiseWorkletNode, loadRnnoise } = require('@sapphi-red/web-noise-suppr
 // declares "type": "module", which makes Node treat every plain .js file
 // inside it — including dist/index.js, which is actually written in
 // CommonJS syntax — as an ES module. require() on it throws
-// "exports is not defined in ES module scope" as a direct result. The
-// package's real ESM build works fine; loading it via dynamic import()
-// instead of require() sidesteps the broken CJS path entirely. Lazy +
-// cached since import() is async and this only needs to happen once.
+// "exports is not defined in ES module scope" as a direct result.
+//
+// Loading the real ESM build via import() instead of require() sidesteps
+// that — but import() in Electron's renderer goes through Chromium's own
+// module loader, not Node's, so it has no concept of a bare npm
+// specifier the way require() does. It needs an actual URL. The fix
+// combines both: require.resolve() to find where the package physically
+// lives on disk (this still works fine, it just resolves to the broken
+// CJS file), then point at that file's sibling ESM build instead, turned
+// into a proper file:// URL via pathToFileURL (handles Windows drive
+// letters/backslashes correctly, unlike hand-built string concatenation).
+//
+// Lazy + cached since import() is async and this only needs to happen once.
+const { pathToFileURL } = require('url');
 let DeepFilterNet3CoreClass = null;
 async function getDeepFilterNet3Core() {
   if (!DeepFilterNet3CoreClass) {
-    const mod = await import('deepfilternet3-noise-filter');
+    const cjsPath = require.resolve('deepfilternet3-noise-filter');
+    const esmPath = cjsPath.replace(/index\.js$/, 'index.esm.js');
+    const mod = await import(pathToFileURL(esmPath).href);
     DeepFilterNet3CoreClass = mod.DeepFilterNet3Core;
   }
   return DeepFilterNet3CoreClass;
