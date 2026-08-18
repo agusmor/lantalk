@@ -20,7 +20,46 @@ let voiceActive = false;
 let sharing = false;
 let sharePending = false;
 let lastSearchRequestId = 0;
-const peers = new Map(); // id -> { name, pc, audioEl, videoEl }
+// peers: live connection-session state, keyed by the server's transient
+// connection id (resets to 1 on every server restart, and changes every
+// time someone reconnects — so a RTCPeerConnection/audioEl/etc belongs
+// here, since those genuinely die and get rebuilt on reconnect too).
+const peers = new Map(); // connectionId -> { clientId, pc, audioEl, videoEl, videoTileEl, ... }
+
+// peerSettings: persistent per-person data, keyed by the stable UUID
+// each client sends on join — survives a peer disconnecting and
+// reconnecting, unlike `peers` above. Currently just name + local
+// volume; the natural place to add more per-person preferences later.
+const peerSettings = new Map(); // clientId -> { name, volume }
+
+function ensurePeerSettings(clientId, name) {
+  let s = peerSettings.get(clientId);
+  if (!s) {
+    s = { name, volume: 1.0 };
+    peerSettings.set(clientId, s);
+  } else if (name) {
+    s.name = name; // keep it current in case they changed it since last seen
+  }
+  return s;
+}
+
+function peerDisplayName(entry) {
+  if (!entry || !entry.clientId) return 'Someone';
+  return peerSettings.get(entry.clientId)?.name || 'Someone';
+}
+
+// Updates the stored preference (so it survives a reconnect) and, if
+// this person currently has a live connection, applies it immediately
+// too — the two can be out of sync since settings persist but
+// connections don't.
+function setPeerVolume(clientId, volume) {
+  ensurePeerSettings(clientId).volume = volume;
+  for (const entry of peers.values()) {
+    if (entry.clientId === clientId && entry.audioEl) {
+      entry.audioEl.volume = volume;
+    }
+  }
+}
 
 // Pure LAN/ZeroTier: no NAT to punch through, so no STUN/TURN needed.
 const ICE_CONFIG = { iceServers: [] };
@@ -299,7 +338,8 @@ function handleMessage(msg) {
     case 'welcome':
       myId = msg.yourId;
       for (const p of msg.peers) {
-        peers.set(p.id, { name: p.name, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
+        ensurePeerSettings(p.clientId, p.name);
+        peers.set(p.id, { clientId: p.clientId, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
       }
       showChatScreen();
       appendSystemMessage(`Connected as ${myName}.`);
@@ -307,14 +347,15 @@ function handleMessage(msg) {
       break;
 
     case 'peer-joined':
-      peers.set(msg.id, { name: msg.name, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
+      ensurePeerSettings(msg.clientId, msg.name);
+      peers.set(msg.id, { clientId: msg.clientId, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
       appendSystemMessage(`${msg.name} joined.`);
       updatePeerCount();
       break;
 
     case 'peer-left': {
       const entry = peers.get(msg.id);
-      const name = entry ? entry.name : 'Someone';
+      const name = peerDisplayName(entry);
       closePeerConnection(msg.id);
       peers.delete(msg.id);
       appendSystemMessage(`${name} left.`);
@@ -336,7 +377,7 @@ function handleMessage(msg) {
       // null" happens even though nothing was actually reordered or lost.
       entry.signalChain = (entry.signalChain || Promise.resolve())
         .then(() => handleSignal(msg.from, msg.data))
-        .catch((err) => console.error(`[voice] queued signal failed for ${entry.name}:`, err.message));
+        .catch((err) => console.error(`[voice] queued signal failed for ${peerDisplayName(entry)}:`, err.message));
       break;
     }
 
@@ -423,7 +464,7 @@ function createPeerConnection(id, isInitiator) {
 
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'failed') {
-      console.warn(`[voice] connection to ${entry.name} failed`);
+      console.warn(`[voice] connection to ${peerDisplayName(entry)} failed`);
     }
   };
 
@@ -439,7 +480,7 @@ function createPeerConnection(id, isInitiator) {
       await pc.setLocalDescription(offer);
       sendSignal(id, { sdp: pc.localDescription });
     } catch (err) {
-      console.error(`[voice] negotiation failed for ${entry.name}:`, err.message);
+      console.error(`[voice] negotiation failed for ${peerDisplayName(entry)}:`, err.message);
     } finally {
       entry.makingOffer = false;
     }
@@ -478,12 +519,12 @@ async function handleSignal(fromId, data) {
         // Expected/benign if this candidate belonged to an offer we
         // just deliberately ignored — anything else is worth knowing about.
         if (!entry.ignoredOffer) {
-          console.warn(`[voice] ICE candidate error for ${entry.name}:`, err.message);
+          console.warn(`[voice] ICE candidate error for ${peerDisplayName(entry)}:`, err.message);
         }
       }
     }
   } catch (err) {
-    console.error(`[voice] signal handling failed for ${entry.name}:`, err.message);
+    console.error(`[voice] signal handling failed for ${peerDisplayName(entry)}:`, err.message);
   }
 }
 
@@ -494,6 +535,7 @@ function attachRemoteAudio(id, stream) {
     const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
     audioEl.muted = deafened;
+    audioEl.volume = peerSettings.get(entry.clientId)?.volume ?? 1.0;
     audioContainerEl.appendChild(audioEl);
     entry.audioEl = audioEl;
   }
@@ -515,7 +557,7 @@ function attachRemoteVideo(id, stream) {
         <button class="tile-btn pip-btn" title="Pop out">🗗</button>
       </div>
     `;
-    tile.querySelector('.tile-label').textContent = `${entry.name}'s screen`;
+    tile.querySelector('.tile-label').textContent = `${peerDisplayName(entry)}'s screen`;
 
     const videoEl = tile.querySelector('video');
 
@@ -592,7 +634,7 @@ function togglePopout(entry, tile) {
     </div>
     <div class="popout-body"></div>
   `;
-  popout.querySelector('.popout-title').textContent = `${entry.name}'s screen`;
+  popout.querySelector('.popout-title').textContent = `${peerDisplayName(entry)}'s screen`;
   popout.querySelector('.popout-body').appendChild(videoEl);
   document.body.appendChild(popout);
   entry.popoutEl = popout;
