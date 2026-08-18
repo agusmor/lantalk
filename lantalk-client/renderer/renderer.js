@@ -83,6 +83,7 @@ const connectBtn = document.getElementById('connect-btn');
 const contextMenu = document.getElementById("peer-context-menu");
 const statusEl = document.getElementById('status');
 const peerCountEl = document.getElementById('peer-count');
+const peerTooltip = document.getElementById("peer-tooltip");
 const chatLog = document.getElementById('chat-log');
 const chatInput = document.getElementById('chat-input');
 const chatSendBtn = document.getElementById('chat-send');
@@ -510,6 +511,29 @@ streamVolume.addEventListener("input", () => {
 
   console.log("Stream volume:", streamVolume.value);
   console.log("For peer:", peerId);
+});
+
+peerCountEl.addEventListener("mouseenter", () => {
+  peerTooltip.replaceChildren();
+
+  for (const [uuid, data] of peers) {
+    const name = document.createElement("div");
+
+    name.textContent = data.name;
+
+    peerTooltip.appendChild(name);
+  }
+
+  const rect = peerCountEl.getBoundingClientRect();
+
+  peerTooltip.style.left = `${rect.left}px`;
+  peerTooltip.style.top = `${rect.bottom + 5}px`;
+
+  peerTooltip.style.display = "block";
+});
+
+peerCountEl.addEventListener("mouseleave", () => {
+  peerTooltip.style.display = "none";
 });
 
 // --- voice -------------------------------------------------------------

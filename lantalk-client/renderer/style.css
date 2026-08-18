@@ -579,3 +579,23 @@ input[type="text"] {
 .context-menu button:hover {
   background: #2c3038;
 }
+
+.peer-count {
+  position: relative;
+  cursor: default;
+}
+
+.peer-tooltip {
+  display: none;
+  position: fixed;
+
+  background: #1d2026;
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+
+  padding: 8px 12px;
+  min-width: 120px;
+
+  font-size: 12px;
+  z-index: 1000;
+}
