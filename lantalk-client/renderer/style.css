@@ -546,3 +546,36 @@ input[type="text"] {
   width: 100%;
   accent-color: #4f6bfa;
 }
+
+
+
+.context-menu {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+
+  flex-direction: column;
+
+  background: #1d2026;
+  border: 1px solid #2a2e36;
+  border-radius: 8px;
+
+  padding: 4px;
+  min-width: 160px;
+}
+
+.context-menu button {
+  border: none;
+  background: transparent;
+  color: #e8e8ec;
+
+  padding: 8px 10px;
+  text-align: left;
+
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.context-menu button:hover {
+  background: #2c3038;
+}

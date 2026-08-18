@@ -6,7 +6,6 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
   <!-- CONNECT SCREEN -->
   <div id="connect-screen" class="screen">
     <div class="card">
@@ -54,29 +53,15 @@
         </button>
       
         <section class="stream-section">
-      
           <ul class="stream-list">
-      
-            <li class="stream-user">
-              <button>
-                Alice
-              </button>
-            </li>
-      
-            <li class="stream-user">
+            <!-- 
+            <li class="stream-user" data-peer-id="550e8400-e29b-41d4-a716-446655440000">
               <button>
                 Bob
               </button>
-            </li>
-      
-            <li class="stream-user">
-              <button>
-                Charlie
-              </button>
-            </li>
-      
+            </li> 
+            -->
           </ul>
-      
         </section>
         
       
@@ -155,6 +140,39 @@
         <input id="suppression-level-input" type="range" min="0" max="100" value="50" />
       </div>
     </div>
+  </div>
+
+
+  <div id="peer-context-menu" class="context-menu">
+
+    <label>
+      VC Volume
+      <input
+        type="range"
+        id="vc-volume"
+        min="0"
+        max="100"
+        value="100"
+      >
+    </label>
+
+    <label>
+      Stream Volume
+      <input
+        type="range"
+        id="stream-volume"
+        min="0"
+        max="100"
+        value="100"
+      >
+    </label>
+
+    <hr>
+
+    <button data-action="stop-viewing">
+      Stop Viewing Stream
+    </button>
+
   </div>
 
   <script src="renderer.js"></script>

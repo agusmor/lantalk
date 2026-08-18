@@ -80,6 +80,7 @@ const chatScreen = document.getElementById('chat-screen');
 const nameInput = document.getElementById('name-input');
 const serverInput = document.getElementById('server-input');
 const connectBtn = document.getElementById('connect-btn');
+const contextMenu = document.getElementById("peer-context-menu");
 const statusEl = document.getElementById('status');
 const peerCountEl = document.getElementById('peer-count');
 const chatLog = document.getElementById('chat-log');
@@ -102,10 +103,13 @@ const settingsBtnConnect = document.getElementById('settings-btn-connect');
 const settingsBtnChat = document.getElementById('settings-btn-chat');
 const settingsOverlayEl = document.getElementById('settings-overlay');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
+const streamList = document.querySelector(".stream-list");
 const noiseSuppressionSelect = document.getElementById('noise-suppression-select');
 const suppressionLevelRow = document.getElementById('suppression-level-row');
 const suppressionLevelInput = document.getElementById('suppression-level-input');
 const suppressionLevelValueEl = document.getElementById('suppression-level-value');
+const vcVolume = document.getElementById("vc-volume");
+const streamVolume = document.getElementById("stream-volume");
 
 // --- persistent identity -------------------------------------------
 // A small UUID generated once and stored on disk, sent alongside 'join'
@@ -339,7 +343,7 @@ function handleMessage(msg) {
       myId = msg.yourId;
       for (const p of msg.peers) {
         ensurePeerSettings(p.clientId, p.name);
-        peers.set(p.id, { clientId: p.clientId, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
+        peers.set(p.id, { clientId: p.clientId, name: p.name, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
       }
       showChatScreen();
       appendSystemMessage(`Connected as ${myName}.`);
@@ -348,7 +352,7 @@ function handleMessage(msg) {
 
     case 'peer-joined':
       ensurePeerSettings(msg.clientId, msg.name);
-      peers.set(msg.id, { clientId: msg.clientId, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
+      peers.set(msg.id, { clientId: msg.clientId, name: msg.name, pc: null, audioEl: null, videoEl: null, videoTileEl: null });
       appendSystemMessage(`${msg.name} joined.`);
       updatePeerCount();
       break;
@@ -423,7 +427,90 @@ function showChatScreen() {
 function updatePeerCount() {
   const count = peers.size + 1; // +1 for yourself
   peerCountEl.textContent = `${count} online`;
+  updatePeerScreen();
 }
+
+function updatePeerScreen() {
+  streamList.replaceChildren();
+
+  for (const [uuid, data] of peers) {
+    const li = document.createElement("li");
+    li.className = "stream-user";
+    li.dataset.peerId = uuid;
+
+    const button = document.createElement("button");
+    button.textContent = data.name;
+
+    li.appendChild(button);
+    streamList.appendChild(li);
+  }
+}
+
+streamList.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+
+  const button = event.target.closest("button");
+
+  if (!button) return;
+
+  const user = button.closest(".stream-user");
+  const uuid = user.dataset.peerId;
+  
+
+  // Remember who the menu belongs to
+  contextMenu.dataset.peerId = uuid;
+
+  // Position the menu at the mouse
+  contextMenu.style.left = `${event.clientX}px`;
+  contextMenu.style.top = `${event.clientY}px`;
+
+  contextMenu.style.display = "flex";
+});
+
+contextMenu.addEventListener("click", (event) => {
+  const action = event.target.dataset.action;
+
+  if (!action) return;
+
+  const peerId = contextMenu.dataset.peerId;
+
+  console.log("Action:", action);
+  console.log("Peer:", peerId);
+
+  switch (action) {
+    case "vc-volume":
+      console.log("Adjust VC volume for", peerId);
+      break;
+
+    case "stream-volume":
+      console.log("Adjust stream volume for", peerId);
+      break;
+
+    case "stop-viewing":
+      console.log("Stop viewing stream from", peerId);
+      break;
+  }
+
+  contextMenu.style.display = "none";
+});
+
+document.addEventListener("click", (event) => {
+  if (!contextMenu.contains(event.target)) {
+    contextMenu.style.display = "none";
+  }
+});
+
+vcVolume.addEventListener("input", () => {
+  const uuid = contextMenu.dataset.peerId;
+  setPeerVolume(uuid, vcVolume.value)
+});
+
+streamVolume.addEventListener("input", () => {
+  const peerId = contextMenu.dataset.peerId;
+
+  console.log("Stream volume:", streamVolume.value);
+  console.log("For peer:", peerId);
+});
 
 // --- voice -------------------------------------------------------------
 // One RTCPeerConnection per other participant (full mesh). The relay
