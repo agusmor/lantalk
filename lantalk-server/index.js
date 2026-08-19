@@ -18,28 +18,28 @@ fs.mkdirSync(dataDir, { recursive: true });
 const db = new Database(path.join(dataDir, 'chat.db'));
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id TEXT,
-    name TEXT NOT NULL,
-    text TEXT NOT NULL,
-    ts INTEGER NOT NULL
-  );
-  CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-    name, text, content='messages', content_rowid='id'
-  );
-  CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-    INSERT INTO messages_fts(rowid, name, text) VALUES (new.id, new.name, new.text);
-  END;
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id TEXT,
+  name TEXT NOT NULL,
+  text TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  name, text, content='messages', content_rowid='id'
+);
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+INSERT INTO messages_fts(rowid, name, text) VALUES (new.id, new.name, new.text);
+END;
 `);
 
 const insertMessage = db.prepare('INSERT INTO messages (client_id, name, text, ts) VALUES (?, ?, ?, ?)');
 const recentMessages = db.prepare('SELECT client_id AS clientId, name, text, ts FROM messages ORDER BY id DESC LIMIT ?');
 const searchMessages = db.prepare(`
-  SELECT m.client_id AS clientId, m.name, m.text, m.ts
-  FROM messages_fts f JOIN messages m ON m.id = f.rowid
-  WHERE messages_fts MATCH ?
-  ORDER BY m.id DESC LIMIT ?
+SELECT m.client_id AS clientId, m.name, m.text, m.ts
+FROM messages_fts f JOIN messages m ON m.id = f.rowid
+WHERE messages_fts MATCH ?
+ORDER BY m.id DESC LIMIT ?
 `);
 
 process.on('SIGINT', () => { db.close(); process.exit(0); });
@@ -78,7 +78,7 @@ discoverySocket.on('message', (raw, rinfo) => {
   const reply = JSON.stringify({
     type: 'lantalk-announce',
     name: os.hostname(),
-    port: PORT,
+                               port: PORT,
   });
   discoverySocket.send(reply, rinfo.port, rinfo.address, (err) => {
     if (err) console.error(`[discovery] failed to reply to ${rinfo.address}:`, err.message);
@@ -128,12 +128,12 @@ wss.on('connection', (ws) => {
         type: 'welcome',
         yourId: id,
         peers: [...clients.entries()]
-          .filter(([pid]) => pid !== id)
-          .map(([pid, c]) => ({ id: pid, name: c.name })),
+        .filter(([pid]) => pid !== id)
+        .map(([pid, c]) => ({ id: pid, name: c.name, clientId: c.clientId })),
       }));
 
       // Tell everyone else the new client arrived.
-      broadcast({ type: 'peer-joined', id, name }, id);
+      broadcast({ type: 'peer-joined', id, name, clientId: client.clientId }, id);
     }
 
     else if (msg.type === 'chat') {
@@ -171,8 +171,8 @@ wss.on('connection', (ws) => {
       ws.send(JSON.stringify({
         type: 'voice-peers',
         peers: [...clients.entries()]
-          .filter(([pid, c]) => pid !== id && c.voiceActive)
-          .map(([pid]) => pid),
+        .filter(([pid, c]) => pid !== id && c.voiceActive)
+        .map(([pid]) => pid),
       }));
 
       broadcast({ type: 'peer-voice-on', id }, id);
@@ -185,7 +185,7 @@ wss.on('connection', (ws) => {
       console.log(`[voice] ${sender.name} left voice`);
       broadcast({ type: 'peer-voice-off', id }, id);
     }
-    
+
     else if (msg.type === 'chat-search') {
       const query = String(msg.query || '').trim();
       let results = [];
