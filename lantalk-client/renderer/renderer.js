@@ -35,7 +35,7 @@ const peerSettings = new Map(); // clientId -> { name, volume }
 function ensurePeerSettings(clientId, name) {
   let s = peerSettings.get(clientId);
   if (!s) {
-    s = { name, volume: 1.0 };
+    s = { name, micVolume: 1.0, streamVolume: 1.0 };
     peerSettings.set(clientId, s);
   } else if (name) {
     s.name = name; // keep it current in case they changed it since last seen
@@ -48,15 +48,25 @@ function peerDisplayName(entry) {
   return peerSettings.get(entry.clientId)?.name || 'Someone';
 }
 
-// Updates the stored preference (so it survives a reconnect) and, if
-// this person currently has a live connection, applies it immediately
-// too — the two can be out of sync since settings persist but
-// connections don't.
-function setPeerVolume(clientId, volume) {
-  ensurePeerSettings(clientId).volume = volume;
+// Voice (mic) and stream (screen-share) audio are deliberately separate
+// controls, not one shared volume — a person's mic and their screen
+// share are different things to want at different levels. Each updates
+// the persisted setting (so it survives a reconnect) and, if that
+// person currently has a live connection, applies it immediately too.
+function setPeerMicVolume(clientId, volume) {
+  ensurePeerSettings(clientId).micVolume = volume;
   for (const entry of peers.values()) {
     if (entry.clientId === clientId && entry.audioEl) {
       entry.audioEl.volume = volume;
+    }
+  }
+}
+
+function setPeerStreamVolume(clientId, volume) {
+  ensurePeerSettings(clientId).streamVolume = volume;
+  for (const entry of peers.values()) {
+    if (entry.clientId === clientId && entry.videoEl) {
+      entry.videoEl.volume = volume;
     }
   }
 }
@@ -434,10 +444,13 @@ function updatePeerCount() {
 function updatePeerScreen() {
   streamList.replaceChildren();
 
-  for (const [uuid, data] of peers) {
+  for (const [connectionId, data] of peers) {
     const li = document.createElement("li");
     li.className = "stream-user";
-    li.dataset.peerId = uuid;
+    // data.clientId is the person's stable UUID — connectionId here is
+    // just this specific session's transient id (resets on reconnect),
+    // wrong thing to key volume settings against.
+    li.dataset.peerId = data.clientId;
 
     const button = document.createElement("button");
     button.textContent = data.name;
@@ -455,11 +468,16 @@ streamList.addEventListener("contextmenu", (event) => {
   if (!button) return;
 
   const user = button.closest(".stream-user");
-  const uuid = user.dataset.peerId;
-  
+  const clientId = user.dataset.peerId;
 
   // Remember who the menu belongs to
-  contextMenu.dataset.peerId = uuid;
+  contextMenu.dataset.peerId = clientId;
+
+  // Reflect this specific person's current settings rather than
+  // whatever the sliders were last left at from someone else's menu.
+  const settings = peerSettings.get(clientId);
+  vcVolume.value = Math.round((settings?.micVolume ?? 1.0) * 100);
+  streamVolume.value = Math.round((settings?.streamVolume ?? 1.0) * 100);
 
   // Position the menu at the mouse
   contextMenu.style.left = `${event.clientX}px`;
@@ -502,15 +520,14 @@ document.addEventListener("click", (event) => {
 });
 
 vcVolume.addEventListener("input", () => {
-  const uuid = contextMenu.dataset.peerId;
-  setPeerVolume(uuid, vcVolume.value)
+  const clientId = contextMenu.dataset.peerId;
+  // Sliders are 0-100 for a nicer UI; audio elements want 0.0-1.0.
+  setPeerMicVolume(clientId, vcVolume.value / 100);
 });
 
 streamVolume.addEventListener("input", () => {
-  const peerId = contextMenu.dataset.peerId;
-
-  console.log("Stream volume:", streamVolume.value);
-  console.log("For peer:", peerId);
+  const clientId = contextMenu.dataset.peerId;
+  setPeerStreamVolume(clientId, streamVolume.value / 100);
 });
 
 peerCountEl.addEventListener("mouseenter", () => {
@@ -564,6 +581,15 @@ function createPeerConnection(id, isInitiator) {
 
   pc.ontrack = (e) => {
     if (e.track.kind === 'audio') {
+      // Screen-share audio and mic audio both arrive over this same
+      // connection. They're told apart by which stream they're grouped
+      // under: screen-share adds its audio track to the same MediaStream
+      // as its video track (screenStream), so if this audio's stream
+      // also carries a video track, it's screen-share audio — it just
+      // needs to ride along with that <video> element (which plays any
+      // audio in its own srcObject automatically), not go through the
+      // single per-peer element reserved for mic audio.
+      if (e.streams[0] && e.streams[0].getVideoTracks().length > 0) return;
       attachRemoteAudio(id, e.streams[0]);
     } else if (e.track.kind === 'video') {
       attachRemoteVideo(id, e.streams[0]);
@@ -646,7 +672,7 @@ function attachRemoteAudio(id, stream) {
     const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
     audioEl.muted = deafened;
-    audioEl.volume = peerSettings.get(entry.clientId)?.volume ?? 1.0;
+    audioEl.volume = peerSettings.get(entry.clientId)?.micVolume ?? 1.0;
     audioContainerEl.appendChild(audioEl);
     entry.audioEl = audioEl;
   }
@@ -661,7 +687,7 @@ function attachRemoteVideo(id, stream) {
     const tile = document.createElement('div');
     tile.className = 'screen-tile';
     tile.innerHTML = `
-      <video autoplay playsinline muted></video>
+      <video autoplay playsinline></video>
       <div class="tile-label"></div>
       <div class="tile-controls">
         <button class="tile-btn fullscreen-btn" title="Fullscreen">⛶</button>
@@ -671,6 +697,7 @@ function attachRemoteVideo(id, stream) {
     tile.querySelector('.tile-label').textContent = `${peerDisplayName(entry)}'s screen`;
 
     const videoEl = tile.querySelector('video');
+    videoEl.volume = peerSettings.get(entry.clientId)?.streamVolume ?? 1.0;
 
     // This is a live stream, not a recording — there's no meaningful
     // paused state. Fullscreen adds native click/spacebar pause handling
@@ -1145,7 +1172,12 @@ async function startScreenShare() {
   shareBtn.textContent = 'Choose window/screen…';
   try {
     screenStream = await Promise.race([
-      navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }),
+      // Whether the picker actually offers audio at all — a whole
+      // separate system tray/tab audio, not the mic — varies a lot by
+      // OS and, on Linux, by compositor/portal version. Asking for
+      // audio: true here doesn't guarantee getting an audio track back;
+      // handled as optional below rather than assumed.
+      navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Picker timed out — this can happen on Wayland if the OS picker was closed without choosing anything. Try again.')), 30000)
       ),
@@ -1167,14 +1199,19 @@ async function startScreenShare() {
   sharePending = false;
   shareBtn.disabled = false;
 
-  const track = screenStream.getVideoTracks()[0];
+  const videoTrack = screenStream.getVideoTracks()[0];
+  const audioTrack = screenStream.getAudioTracks()[0]; // may not exist, see note above
+
   // Fires when the user stops sharing via the OS's own "stop sharing"
-  // control, not just via our button.
-  track.onended = () => stopScreenShare();
+  // control, not just our button — only the video track reliably gets
+  // this event across browsers/OSes, so it's what drives the cleanup
+  // regardless of whether audio was captured too.
+  videoTrack.onended = () => stopScreenShare();
 
   for (const entry of peers.values()) {
     if (!entry.pc) continue;
-    entry.pc.addTrack(track, screenStream);
+    entry.pc.addTrack(videoTrack, screenStream);
+    if (audioTrack) entry.pc.addTrack(audioTrack, screenStream);
   }
 
   sharing = true;
@@ -1185,10 +1222,10 @@ async function startScreenShare() {
 function stopScreenShare() {
   if (!sharing) return;
 
-  const track = screenStream ? screenStream.getVideoTracks()[0] : null;
-  if (track) {
-    for (const entry of peers.values()) {
-      if (!entry.pc) continue;
+  const tracksToRemove = screenStream ? screenStream.getTracks() : [];
+  for (const entry of peers.values()) {
+    if (!entry.pc) continue;
+    for (const track of tracksToRemove) {
       const sender = entry.pc.getSenders().find((s) => s.track === track);
       if (sender) entry.pc.removeTrack(sender);
     }
